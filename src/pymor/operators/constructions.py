@@ -101,11 +101,30 @@ class LincombOperator(OperatorBase):
         elif self._try_assemble:
             return self.assemble().apply(U, ind=ind)
         coeffs = self.evaluate_coefficients(mu)
-        Vs = [op.apply(U, ind=ind, mu=mu) for op in self.operators]
-        R = Vs[0]
+        R = self.operators[0].apply(U, ind=ind, mu=mu)
         R.scal(coeffs[0])
-        for V, c in izip(Vs[1:], coeffs[1:]):
-            R.axpy(c, V)
+        for op, c in izip(self.operators[1:], coeffs[1:]):
+            R.axpy(c, op.apply(U, ind=ind, mu=mu))
+        return R
+
+    def apply_adjoint(self, U, ind=None, mu=None, source_product=None, range_product=None):
+        if hasattr(self, '_assembled_operator'):
+            if self._defaults_sid == defaults_sid():
+                return self._assembled_operator.apply_adjoint(U, ind=ind, source_product=source_product,
+                                                              range_product=range_product)
+            else:
+                return self.assemble().apply_adjoint(U, ind=ind, source_product=source_product,
+                                                     range_product=range_product)
+        elif self._try_assemble:
+            return self.assemble().apply_adjoint(U, ind=ind, source_product=source_product,
+                                                 range_product=range_product)
+        coeffs = self.evaluate_coefficients(mu)
+        R = self.operators[0].apply_adjoint(U, ind=ind, mu=mu, source_product=source_product,
+                                            range_product=range_product)
+        R.scal(coeffs[0])
+        for op, c in izip(self.operators[1:], coeffs[1:]):
+            R.axpy(c, op.apply_adjoint(U, ind=ind, mu=mu, source_product=source_product,
+                                       range_product=range_product))
         return R
 
     def assemble(self, mu=None):
@@ -220,6 +239,11 @@ class Concatenation(OperatorBase):
         mu = self.parse_parameter(mu)
         return self.second.apply(self.first.apply(U, ind=ind, mu=mu), mu=mu)
 
+    def apply_adjoint(self, U, ind=None, mu=None, source_product=None, range_product=None):
+        mu = self.parse_parameter(mu)
+        return self.first.apply_adjoint(self.second.apply_adjoint(U, ind=ind, mu=mu, range_product=range_product),
+                                        mu=mu, source_product=source_product)
+
     def _restricted(self, components):
         restricted_second, second_source_components = self.second.restricted(components)
         restricted_first, first_source_components = self.first.restricted(second_source_components)
@@ -288,6 +312,19 @@ class IdentityOperator(OperatorBase):
     def apply(self, U, ind=None, mu=None):
         assert U in self.source
         return U.copy(ind=ind)
+
+    def apply_adjoint(self, U, ind=None, mu=None, source_product=None, range_product=None):
+        assert U in self.range
+        assert source_product is None or source_product.source == source_product.range == self.source
+        assert range_product is None or range_product.source == range_product.range == self.range
+        if range_product:
+            PrU = range_product.apply(U, ind=ind)
+        else:
+            PrU = U.copy(ind=ind)
+        if source_product:
+            return source_product.apply_inverse(PrU)
+        else:
+            return PrU
 
 
 class ConstantOperator(OperatorBase):
@@ -388,19 +425,28 @@ class VectorArrayOperator(OperatorBase):
             return NumpyVectorArray(U.dot(self._array, ind=ind, pairwise=False), copy=False)
 
     def apply_adjoint(self, U, ind=None, mu=None, source_product=None, range_product=None):
-        if self.transposed:
-            raise NotImplementedError
         assert U in self.range
         assert source_product is None or source_product.source == source_product.range == self.source
         assert range_product is None or range_product.source == range_product.range == self.range
-        if range_product:
-            ATPrU = NumpyVectorArray(range_product.apply2(self._array, U, U_ind=ind, pairwise=False).T, copy=False)
+        if not self.transposed:
+            if range_product:
+                ATPrU = NumpyVectorArray(range_product.apply2(self._array, U, U_ind=ind, pairwise=False).T, copy=False)
+            else:
+                ATPrU = NumpyVectorArray(self._array.dot(U, o_ind=ind, pairwise=False).T, copy=False)
+            if source_product:
+                return source_product.apply_inverse(ATPrU)
+            else:
+                return ATPrU
         else:
-            ATPrU = NumpyVectorArray(self._array.dot(U, o_ind=ind, pairwise=False).T, copy=False)
-        if source_product:
-            return source_product.apply_inverse(ATPrU)
-        else:
-            return ATPrU
+            if range_product:
+                PrU = range_product.apply(U, ind=ind)
+            else:
+                PrU = U.copy(ind)
+            ATPrU = self._array.lincomb(PrU.data)
+            if source_product:
+                return source_product.apply_inverse(ATPrU)
+            else:
+                return ATPrU
 
     def assemble_lincomb(self, operators, coefficients, name=None):
 
@@ -454,14 +500,6 @@ class VectorOperator(VectorArrayOperator):
         assert isinstance(vector, VectorArrayInterface)
         assert len(vector) == 1
         super(VectorOperator, self).__init__(vector, transposed=False, copy=copy, name=name)
-
-    def apply(self, U, ind=None, mu=None):
-        assert U in self.source
-        count = len(U) if ind is None else 1 if isinstance(ind, Number) else len(ind)
-        R = self._array.copy(ind=([0] * count))
-        for i, c in enumerate(U.data):
-            R.scal(c[0], ind=i)
-        return R
 
 
 class VectorFunctional(VectorArrayOperator):
@@ -534,6 +572,10 @@ class FixedParameterOperator(OperatorBase):
 
     def apply(self, U, ind=None, mu=None):
         return self.operator.apply(U, ind=ind, mu=self.mu)
+
+    def apply_adjoint(self, U, ind=None, mu=None, source_product=None, range_product=None):
+        return self.operator.apply_adjoint(U, ind=ind, mu=self.mu,
+                                           source_product=source_product, range_product=range_product)
 
     @property
     def invert_options(self):
