@@ -30,17 +30,18 @@ class NumpyVectorArray(VectorArrayInterface):
     """
 
     def __init__(self, instance, dtype=None, copy=False, order=None, subok=False):
+        assert not isinstance(instance, np.matrixlib.defmatrix.matrix)
         if isinstance(instance, np.ndarray):
             if copy:
                 self._array = instance.copy()
             else:
                 self._array = instance
+        elif issparse(instance):
+            self._array = np.array(instance.todense(), copy=False)
         elif hasattr(instance, 'data'):
             self._array = instance.data
             if copy:
                 self._array = self._array.copy()
-        elif issparse(instance):
-            self._array = np.array(instance.todense(), copy=False)
         else:
             self._array = np.array(instance, dtype=dtype, copy=copy, order=order, subok=subok, ndmin=2)
         if self._array.ndim != 2:
@@ -197,11 +198,14 @@ class NumpyVectorArray(VectorArrayInterface):
 
     def scal(self, alpha, ind=None):
         assert self.check_ind_unique(ind)
-        assert isinstance(alpha, Number)
+        assert isinstance(alpha, Number) \
+            or isinstance(alpha, np.ndarray) and alpha.shape == (self.len_ind(ind),)
 
         if NUMPY_INDEX_QUIRK and self._len == 0:
             return
 
+        if isinstance(alpha, np.ndarray) and not isinstance(ind, Number):
+            alpha = alpha[:, np.newaxis]
         if ind is None:
             self._array[:self._len] *= alpha
         else:
@@ -211,7 +215,9 @@ class NumpyVectorArray(VectorArrayInterface):
         assert self.check_ind_unique(ind)
         assert x.check_ind(x_ind)
         assert self.dim == x.dim
-        assert self.len_ind(ind) == x.len_ind(x_ind)
+        assert self.len_ind(ind) == x.len_ind(x_ind) or x.len_ind(x_ind) == 1
+        assert isinstance(alpha, Number) \
+            or isinstance(alpha, np.ndarray) and alpha.shape == (self.len_ind(ind),)
 
         if NUMPY_INDEX_QUIRK:
             if self._len == 0 and hasattr(ind, '__len__'):
@@ -219,26 +225,34 @@ class NumpyVectorArray(VectorArrayInterface):
             if x._len == 0 and hasattr(x_ind, '__len__'):
                 x_ind = None
 
-        if alpha == 0:
+        if np.all(alpha == 0):
             return
 
         B = x._array[:x._len] if x_ind is None else x._array[x_ind]
 
-        if alpha == 1:
+        if np.all(alpha == 1):
             if ind is None:
                 self._array[:self._len] += B
+            elif isinstance(ind, Number) and B.ndim == 2:
+                self._array[ind] += B.reshape((B.shape[1],))
             else:
                 self._array[ind] += B
-        elif alpha == -1:
+        elif np.all(alpha == -1):
             if ind is None:
                 self._array[:self._len] -= B
+            elif isinstance(ind, Number) and B.ndim == 2:
+                self._array[ind] -= B.reshape((B.shape[1],))
             else:
                 self._array[ind] -= B
         else:
+            if isinstance(alpha, np.ndarray):
+                alpha = alpha[:, np.newaxis]
             if ind is None:
-                self._array[:self._len] += B * alpha
+                self._array[:self._len] += (B * alpha)
+            elif isinstance(ind, Number):
+                self._array[ind] += (B * alpha).reshape((-1,))
             else:
-                self._array[ind] += B * alpha
+                self._array[ind] += (B * alpha)
 
     def dot(self, other, pairwise, ind=None, o_ind=None):
         assert self.check_ind(ind)
@@ -360,4 +374,5 @@ class NumpyVectorArray(VectorArrayInterface):
 
 
 def NumpyVectorSpace(dim):
+    """Shorthand for |VectorSpace| `(NumpyVectorArray, dim)`."""
     return VectorSpace(NumpyVectorArray, dim)

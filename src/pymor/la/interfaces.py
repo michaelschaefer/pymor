@@ -30,10 +30,10 @@ class VectorArrayInterface(BasicInterface):
     An implementation of the interface via |NumPy arrays| is given by |NumpyVectorArray|.
     In general, it is the implementors decision how memory is allocated internally (e.g.
     continuous block of memory vs. list of pointers to the individual vectors.) Thus no
-    general assumptions can be made on the costs of operations like appending or removing
+    general assumptions can be made on the costs of operations like appending to or removing
     vectors from the array. As a hint for 'continuous block of memory' implementations,
     |VectorArray| constructors should provide a `reserve` keyword argument which allows
-    to specify to what sizes the array is assumed to grow.
+    to specify to what size the array is assumed to grow.
 
     Most methods provide `ind` and/or `o_ind` arguments which are used to specify on which
     vectors the method is supposed to operate. If `ind` (`o_ind`) is `None` the whole array
@@ -50,7 +50,7 @@ class VectorArrayInterface(BasicInterface):
         purposes or to once transfer data to pyMOR and further process it using NumPy.
         In the case of |NumpyVectorArray|, an actual view of the internally used
         |NumPy array| is returned, so changing it, will alter the |VectorArray|.
-        Thus you cannot assume to own the data returned to you, in general.
+        Thus, you cannot assume to own the data returned to you, in general.
 
     dim
         The dimension of the vectors in the array.
@@ -85,7 +85,7 @@ class VectorArrayInterface(BasicInterface):
         pass
 
     def empty(self, reserve=0):
-        """Create an empty |VectorArray| of same :attr:`~VectorArrayInterface.subtype`.
+        """Create an empty |VectorArray| of the same :attr:`~VectorArrayInterface.subtype`.
 
         Parameters
         ----------
@@ -99,7 +99,7 @@ class VectorArrayInterface(BasicInterface):
         return self.make_array(subtype=self.subtype, reserve=reserve)
 
     def zeros(self, count=1):
-        """Create a |VectorArray| of null vectors of same :attr:`~VectorArrayInterface.subtype`.
+        """Create a |VectorArray| of null vectors of the same :attr:`~VectorArrayInterface.subtype`.
 
         Parameters
         ----------
@@ -234,10 +234,15 @@ class VectorArrayInterface(BasicInterface):
 
             self[ind] = alpha*self[ind]
 
+        If `alpha` is a scalar, each vector is multiplied by this scalar. Otherwise, `alpha`
+        has to be a one-dimensional |NumPy array| of the same length as `self` (`ind`)
+        containing the factors for each vector.
+
         Parameters
         ----------
         alpha
-            The scalar coefficient with which the vectors in `self` are multiplied
+            The scalar coefficient or one-dimensional |NumPy array| of coefficients
+            with which the vectors in `self` are multiplied.
         ind
             Indices of the vectors of `self` that are to be scaled (see class documentation).
             Repeated indices are forbidden.
@@ -252,13 +257,18 @@ class VectorArrayInterface(BasicInterface):
 
             self[ind] = alpha*x[x_ind] + self[ind]
 
-        The subtypes of `self` and `x` as well as the lengths of `self` (`ind`) and
-        `x` (`x_ind`) have to agree.
+        The subtypes of `self` and `x` have to agree. If the length of `x` (`x_ind`) is 1,
+        the same `x` vector is used for all vectors in `self`. Otherwise, the lengths of `self`
+        (`ind`) and `x` (`x_ind`) have to agree.
+        If `alpha` is a scalar, each `x` vector is multiplied with the same factor `alpha`.
+        Otherwise, `alpha` has to be a one-dimensional |NumPy array| of the same length as
+        `self` (`ind`)  containing the coefficients for each `x` vector.
 
         Parameters
         ----------
         alpha
-            The scalar coefficient with which the vectors in `x` are multiplied
+            The scalar coefficient or one-dimensional |NumPy array| of coefficients with which
+            the vectors in `x` are multiplied.
         x
             A |VectorArray| containing the x-summands.
         ind
@@ -334,7 +344,7 @@ class VectorArrayInterface(BasicInterface):
         Parameters
         ----------
         ind
-            Indices of the vectors whose norm is to be calculated (see class documentation).
+            Indices of the vectors whose norms are to be calculated (see class documentation).
 
         Returns
         -------
@@ -350,7 +360,7 @@ class VectorArrayInterface(BasicInterface):
         Parameters
         ----------
         ind
-            Indices of the vectors whose norm is to be calculated (see class documentation).
+            Indices of the vectors whose norms are to be calculated (see class documentation).
 
         Returns
         -------
@@ -365,7 +375,7 @@ class VectorArrayInterface(BasicInterface):
         Parameters
         ----------
         ind
-            Indices of the vectors whose norm is to be calculated (see class documentation).
+            Indices of the vectors whose norms are to be calculated (see class documentation).
 
         Returns
         -------
@@ -389,7 +399,7 @@ class VectorArrayInterface(BasicInterface):
             List or 1D |NumPy array| of indices of the vector components that are to
             be returned.
         ind
-            Indices of the vectors whose components to be calculated (see class documentation).
+            Indices of the vectors whose components are to be calculated (see class documentation).
 
         Returns
         -------
@@ -477,7 +487,7 @@ class VectorArrayInterface(BasicInterface):
                  and (len(ind) == 0 or 0 <= np.min(ind) and np.max(ind) < len(self))))
 
     def check_ind_unique(self, ind):
-        """Check if `ind` is an admissable list of unique indices in the sense of the class documentation."""
+        """Check if `ind` is an admissable list of non-repeated indices in the sense of the class documentation."""
         if ind is None or isinstance(ind, Number) and 0 <= ind < len(self):
             return True
         elif isinstance(ind, list):
@@ -505,12 +515,15 @@ class VectorArrayInterface(BasicInterface):
 class VectorSpace(BasicInterface):
     """Class describing a vector space.
 
-    A vector space is simply the combination of a |VectorArray| class and a
+    A vector space is simply the combination of a |VectorArray| type and a
     :attr:`~VectorArrayInterface.subtype`. This data is exactly sufficient to construct
     new arrays using the :meth:`~VectorArrayInterface.make_array` method.
+    (See the implementation of :meth:`~VectorSpace.zeros`.)
 
-    A |VectorArray| is contained in a vector space, iff it is an instance of the subclass
-    and has the same subtype.
+    A |VectorArray| `U` is contained in a vector space `space`, if ::
+
+        type(U) == space.type and U.subtype == space.subtype
+
 
     Attributes
     ----------

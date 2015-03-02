@@ -11,14 +11,13 @@ import numpy as np
 from pymor.core.defaults import defaults
 from pymor.core.exceptions import AccuracyError
 from pymor.core.logger import getLogger
-from pymor.tools.floatcmp import float_cmp_all
 
 
 @defaults('atol', 'rtol', 'find_duplicates', 'reiterate', 'reiteration_threshold', 'check', 'check_tol')
 def gram_schmidt(A, product=None, atol=1e-13, rtol=1e-13, offset=0, find_duplicates=True,
                  reiterate=True, reiteration_threshold=1e-1, check=True, check_tol=1e-3,
                  copy=False):
-    """Orthonormalize a |VectorArray| using the Gram-Schmidt algorithm.
+    """Orthonormalize a |VectorArray| using the stabilized Gram-Schmidt algorithm.
 
     Parameters
     ----------
@@ -30,7 +29,8 @@ def gram_schmidt(A, product=None, atol=1e-13, rtol=1e-13, offset=0, find_duplica
     atol
         Vectors of norm smaller than `atol` are removed from the array.
     rtol
-        Relative tolerance to determine a linear dependent vector.
+        Relative tolerance used to detect linear dependent vectors
+        (which are then removed from the array).
     offset
         Assume that the first `offset` vectors are already orthogonal and start the
         algorithm at the `offset + 1`-th vector.
@@ -47,7 +47,7 @@ def gram_schmidt(A, product=None, atol=1e-13, rtol=1e-13, offset=0, find_duplica
     check_tol
         Tolerance for the check.
     copy
-        If `True`, create a copy of `A` instead of working directly on `A`.
+        If `True`, create a copy of `A` instead of modifying `A` itself.
 
 
     Returns
@@ -73,7 +73,6 @@ def gram_schmidt(A, product=None, atol=1e-13, rtol=1e-13, offset=0, find_duplica
 
     # main loop
     remove = []
-    norm = None
     for i in xrange(offset, len(A)):
         # first calculate norm
         if product is None:
@@ -91,10 +90,10 @@ def gram_schmidt(A, product=None, atol=1e-13, rtol=1e-13, offset=0, find_duplica
 
         else:
             first_iteration = True
-
+            norm = initial_norm
             # If reiterate is True, reiterate as long as the norm of the vector changes
             # strongly during orthonormalization (due to Andreas Buhr).
-            while first_iteration or reiterate and norm < reiteration_threshold:
+            while first_iteration or reiterate and norm/old_norm < reiteration_threshold:
 
                 if first_iteration:
                     first_iteration = False
@@ -113,9 +112,9 @@ def gram_schmidt(A, product=None, atol=1e-13, rtol=1e-13, offset=0, find_duplica
 
                 # calculate new norm
                 if product is None:
-                    norm = A.l2_norm(ind=i)[0]
+                    old_norm, norm = norm, A.l2_norm(ind=i)[0]
                 else:
-                    norm = np.sqrt(product.apply2(A, A, V_ind=i, U_ind=i, pairwise=True))[0]
+                    old_norm, norm = norm, np.sqrt(product.apply2(A, A, V_ind=i, U_ind=i, pairwise=True))[0]
 
                 # remove vector if it got too small:
                 if norm / initial_norm < rtol:
@@ -123,19 +122,20 @@ def gram_schmidt(A, product=None, atol=1e-13, rtol=1e-13, offset=0, find_duplica
                     remove.append(i)
                     break
 
-                A.scal(1 / norm, ind=i)
+            A.scal(1 / norm, ind=i)
 
     if remove:
         A.remove(remove)
 
     if check:
-        if not product and not float_cmp_all(A.dot(A, pairwise=False), np.eye(len(A)),
-                                             atol=check_tol, rtol=0.):
-            err = np.max(np.abs(A.dot(A, pairwise=False) - np.eye(len(A))))
-            raise AccuracyError('result not orthogonal (max err={})'.format(err))
-        elif product and not float_cmp_all(product.apply2(A, A, pairwise=False), np.eye(len(A)),
-                                           atol=check_tol, rtol=0.):
-            err = np.max(np.abs(product.apply2(A, A, pairwise=False) - np.eye(len(A))))
-            raise AccuracyError('result not orthogonal (max err={})'.format(err))
+        if product:
+            error_matrix = product.apply2(A, A, V_ind=range(offset, len(A)), pairwise=False)
+        else:
+            error_matrix = A.dot(A, ind=range(offset, len(A)), pairwise=False)
+        error_matrix[:len(A) - offset, offset:len(A)] -= np.eye(len(A) - offset)
+        if error_matrix.size > 0:
+            err = np.max(np.abs(error_matrix))
+            if err >= check_tol:
+                raise AccuracyError('result not orthogonal (max err={})'.format(err))
 
     return A

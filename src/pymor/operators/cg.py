@@ -5,7 +5,7 @@
 #
 # Contributors: lucas-ca <lucascamp@web.de>
 
-""" This module provides some operators for continuous finite elements discretizations."""
+""" This module provides some operators for continuous finite element discretizations."""
 
 from __future__ import absolute_import, division, print_function
 
@@ -23,7 +23,8 @@ class L2ProductFunctionalP1(NumpyMatrixBasedOperator):
 
     Boundary treatment can be performed by providing `boundary_info` and `dirichlet_data`,
     in which case the DOFs corresponding to Dirichlet boundaries are set to the values
-    provided by `dirichlet_data`.
+    provided by `dirichlet_data`. Neumann boundaries are handled by providing a
+    `neumann_data` function.
 
     The current implementation works in one and two dimensions, but can be trivially
     extended to arbitrary dimensions.
@@ -31,11 +32,11 @@ class L2ProductFunctionalP1(NumpyMatrixBasedOperator):
     Parameters
     ----------
     grid
-        |Grid| over which to assemble the functional.
+        |Grid| for which to assemble the functional.
     function
         The |Function| with which to take the scalar product.
     boundary_info
-        |BoundaryInfo| determining the Dirichlet boundaries or `None`.
+        |BoundaryInfo| determining the Dirichlet and Neumann boundaries or `None`.
         If `None`, no boundary treatment is performed.
     dirichlet_data
         |Function| providing the Dirichlet boundary values. If `None`,
@@ -130,7 +131,7 @@ class L2ProductFunctionalQ1(NumpyMatrixBasedOperator):
     Parameters
     ----------
     grid
-        |Grid| over which to assemble the functional.
+        |Grid| for which to assemble the functional.
     function
         The |Function| with which to take the scalar product.
     boundary_info
@@ -215,7 +216,7 @@ class L2ProductFunctionalQ1(NumpyMatrixBasedOperator):
 class L2ProductP1(NumpyMatrixBasedOperator):
     """|Operator| representing the L2-product between linear finite element functions.
 
-    To evaluate the product use the :meth:`~pymor.operators.interfaces module.OperatorInterface.apply2`
+    To evaluate the product use the :meth:`~pymor.operators.interfaces.OperatorInterface.apply2`
     method.
 
     The current implementation works in one and two dimensions, but can be trivially
@@ -224,7 +225,7 @@ class L2ProductP1(NumpyMatrixBasedOperator):
     Parameters
     ----------
     grid
-        The |Grid| over which to assemble the product.
+        The |Grid| for which to assemble the product.
     boundary_info
         |BoundaryInfo| for the treatment of Dirichlet boundary conditions.
     dirichlet_clear_rows
@@ -315,7 +316,7 @@ class L2ProductQ1(NumpyMatrixBasedOperator):
     Parameters
     ----------
     grid
-        The |Grid| over which to assemble the product.
+        The |Grid| for which to assemble the product.
     boundary_info
         |BoundaryInfo| for the treatment of Dirichlet boundary conditions.
     dirichlet_clear_rows
@@ -406,7 +407,7 @@ class DiffusionOperatorP1(NumpyMatrixBasedOperator):
     Parameters
     ----------
     grid
-        The |Grid| over which to assemble the operator.
+        The |Grid| for which to assemble the operator.
     boundary_info
         |BoundaryInfo| for the treatment of Dirichlet boundary conditions.
     diffusion_function
@@ -507,9 +508,6 @@ class DiffusionOperatorP1(NumpyMatrixBasedOperator):
         # is implemented by calling self.prune() which creates the view self.data[:self.nnz].
         # Thus, the original data array is not deleted and all memory stays allocated.
 
-        # from pymor.tools.memory import print_memory_usage
-        # print_memory_usage('matrix: {0:5.1f}'.format((A.data.nbytes + A.indptr.nbytes + A.indices.nbytes)/1024**2))
-
         return A
 
 
@@ -527,7 +525,7 @@ class DiffusionOperatorQ1(NumpyMatrixBasedOperator):
     Parameters
     ----------
     grid
-        The |Grid| over which to assemble the operator.
+        The |Grid| for which to assemble the operator.
     boundary_info
         |BoundaryInfo| for the treatment of Dirichlet boundary conditions.
     diffusion_function
@@ -627,9 +625,6 @@ class DiffusionOperatorQ1(NumpyMatrixBasedOperator):
         # coordinates are summed up, resulting in shorter data arrays. The shortening
         # is implemented by calling self.prune() which creates the view self.data[:self.nnz].
         # Thus, the original data array is not deleted and all memory stays allocated.
-
-        # from pymor.tools.memory import print_memory_usage
-        # print_memory_usage('matrix: {0:5.1f}'.format((A.data.nbytes + A.indptr.nbytes + A.indices.nbytes)/1024**2))
 
         return A
 

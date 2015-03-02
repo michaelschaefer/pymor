@@ -177,7 +177,7 @@ if HAVE_PYSIDE:
                 self.slider.setValue(ind)
 
 
-def launch_qt_app(main_window_factory, block):
+def _launch_qt_app(main_window_factory, block):
     """Wrapper to display plot in a separate process."""
 
     def doit():
@@ -201,7 +201,7 @@ def launch_qt_app(main_window_factory, block):
 
 @defaults('backend')
 def visualize_patch(grid, U, bounding_box=([0, 0], [1, 1]), codim=2, title=None, legend=None,
-                    separate_colorbars=False, backend='gl', block=False, columns=2):
+                    separate_colorbars=False, rescale_colorbars=False, backend='gl', block=False, columns=2):
     """Visualize scalar data associated to a two-dimensional |Grid| as a patch plot.
 
     The grid's |ReferenceElement| must be the triangle or square. The data can either
@@ -226,13 +226,16 @@ def visualize_patch(grid, U, bounding_box=([0, 0], [1, 1]), codim=2, title=None,
         Description of the data that is plotted. Most useful if `U` is a tuple in which
         case `legend` has to be a tuple of strings of the same length.
     separate_colorbars
-        If `True` use separate colorbars for each subplot.
+        If `True`, use separate colorbars for each subplot.
+    rescale_colorbars
+        If `True`, rescale colorbars to data in each frame.
     backend
         Plot backend to use ('gl' or 'matplotlib').
     block
-        If `True` block execution until the plot window is closed.
+        If `True`, block execution until the plot window is closed.
     columns
-        The number of columns in the visualizer GUI. This is only used if `U` is a tuple.
+        The number of columns in the visualizer GUI in case multiple plots are displayed
+        at the same time.
     """
     if not HAVE_PYSIDE:
         raise ImportError('cannot visualize: import of PySide failed')
@@ -248,7 +251,8 @@ def visualize_patch(grid, U, bounding_box=([0, 0], [1, 1]), codim=2, title=None,
 
     # TODO extract class
     class MainWindow(PlotMainWindow):
-        def __init__(self, grid, U, bounding_box, codim, title, legend, separate_colorbars, backend):
+        def __init__(self, grid, U, bounding_box, codim, title, legend, separate_colorbars, rescale_colorbars, backend):
+
             assert isinstance(U, VectorArrayInterface) and hasattr(U, 'data') \
                 or (isinstance(U, tuple) and all(isinstance(u, VectorArrayInterface) and hasattr(u, 'data') for u in U)
                     and all(len(u) == len(U[0]) for u in U))
@@ -269,17 +273,28 @@ def visualize_patch(grid, U, bounding_box=([0, 0], [1, 1]), codim=2, title=None,
                 def __init__(self):
                     super(PlotWidget, self).__init__()
                     if separate_colorbars:
-                        vmins = tuple(np.min(u) for u in U)
-                        vmaxs = tuple(np.max(u) for u in U)
+                        if rescale_colorbars:
+                            self.vmins = tuple(np.min(u[0]) for u in U)
+                            self.vmaxs = tuple(np.max(u[0]) for u in U)
+                        else:
+                            self.vmins = tuple(np.min(u) for u in U)
+                            self.vmaxs = tuple(np.max(u) for u in U)
                     else:
-                        vmins = (min(np.min(u) for u in U),) * len(U)
-                        vmaxs = (max(np.max(u) for u in U),) * len(U)
+                        if rescale_colorbars:
+                            self.vmins = (min(np.min(u[0]) for u in U),) * len(U)
+                            self.vmaxs = (max(np.max(u[0]) for u in U),) * len(U)
+                        else:
+                            self.vmins = (min(np.min(u) for u in U),) * len(U)
+                            self.vmaxs = (max(np.max(u) for u in U),) * len(U)
+
                     layout = QHBoxLayout()
                     plot_layout = QGridLayout()
+                    self.colorbarwidgets = [ColorBarWidget(self, vmin=vmin, vmax=vmax)
+                                            for vmin, vmax in izip(self.vmins, self.vmaxs)]
                     plots = [widget(self, grid, vmin=vmin, vmax=vmax, bounding_box=bounding_box, codim=codim)
-                             for vmin, vmax in izip(vmins, vmaxs)]
+                             for vmin, vmax in izip(self.vmins, self.vmaxs)]
                     if legend:
-                        for i, plot, l in izip(xrange(len(plots)), plots, legend):
+                        for i, plot, colorbar, l in izip(xrange(len(plots)), plots, self.colorbarwidgets, legend):
                             subplot_layout = QVBoxLayout()
                             caption = QLabel(l)
                             caption.setAlignment(Qt.AlignHCenter)
@@ -289,27 +304,39 @@ def visualize_patch(grid, U, bounding_box=([0, 0], [1, 1]), codim=2, title=None,
                             else:
                                 hlayout = QHBoxLayout()
                                 hlayout.addWidget(plot)
-                                hlayout.addWidget(ColorBarWidget(self, vmin=vmins[i], vmax=vmaxs[i]))
+                                hlayout.addWidget(colorbar)
                                 subplot_layout.addLayout(hlayout)
                             plot_layout.addLayout(subplot_layout, int(i/columns), (i % columns), 1, 1)
                     else:
-                        for i, plot in enumerate(plots):
+                        for i, plot, colorbar in izip(xrange(len(plots)), plots, self.colorbarwidgets):
                             if not separate_colorbars or backend == 'matplotlib':
                                 plot_layout.addWidget(plot, int(i/columns), (i % columns), 1, 1)
                             else:
                                 hlayout = QHBoxLayout()
                                 hlayout.addWidget(plot)
-                                hlayout.addWidget(ColorBarWidget(self, vmin=vmins[i], vmax=vmaxs[i]))
+                                hlayout.addWidget(colorbar)
                                 plot_layout.addLayout(hlayout, int(i/columns), (i % columns), 1, 1)
                     layout.addLayout(plot_layout)
                     if not separate_colorbars:
-                        layout.addWidget(ColorBarWidget(self, vmin=vmins[0], vmax=vmaxs[0]))
+                        layout.addWidget(self.colorbarwidgets[0])
+                        for w in self.colorbarwidgets[1:]:
+                            w.setVisible(False)
                     self.setLayout(layout)
                     self.plots = plots
 
                 def set(self, U, ind):
-                    for u, plot in izip(U, self.plots):
-                        plot.set(u[ind])
+                    if rescale_colorbars:
+                        if separate_colorbars:
+                            self.vmins = tuple(np.min(u[ind]) for u in U)
+                            self.vmaxs = tuple(np.max(u[ind]) for u in U)
+                        else:
+                            self.vmins = (min(np.min(u[ind]) for u in U),) * len(U)
+                            self.vmaxs = (max(np.max(u[ind]) for u in U),) * len(U)
+
+                    for u, plot, colorbar, vmin, vmax in izip(U, self.plots, self.colorbarwidgets, self.vmins,
+                                                              self.vmaxs):
+                        plot.set(u[ind], vmin=vmin, vmax=vmax)
+                        colorbar.set(vmin=vmin, vmax=vmax)
 
             super(MainWindow, self).__init__(U, PlotWidget(), title=title, length=len(U[0]))
             self.grid = grid
@@ -330,8 +357,10 @@ def visualize_patch(grid, U, bounding_box=([0, 0], [1, 1]), codim=2, title=None,
                         write_vtk(self.grid, NumpyVectorArray(u, copy=False), '{}-{}'.format(base_name, i),
                                   codim=self.codim)
 
-    launch_qt_app(lambda: MainWindow(grid, U, bounding_box, codim, title=title, legend=legend,
-                                     separate_colorbars=separate_colorbars, backend=backend), block)
+    _launch_qt_app(lambda: MainWindow(grid, U, bounding_box, codim, title=title, legend=legend,
+                                      separate_colorbars=separate_colorbars, rescale_colorbars=rescale_colorbars,
+                                      backend=backend),
+                   block)
 
 
 def visualize_matplotlib_1d(grid, U, codim=1, title=None, legend=None, separate_plots=False, block=False):
@@ -382,7 +411,7 @@ def visualize_matplotlib_1d(grid, U, codim=1, title=None, legend=None, separate_
             super(MainWindow, self).__init__(U, plot_widget, title=title, length=len(U[0]))
             self.grid = grid
 
-    launch_qt_app(lambda: MainWindow(grid, U, codim, title=title, legend=legend, separate_plots=separate_plots), block)
+    _launch_qt_app(lambda: MainWindow(grid, U, codim, title=title, legend=legend, separate_plots=separate_plots), block)
 
 
 class PatchVisualizer(BasicInterface):
@@ -415,7 +444,7 @@ class PatchVisualizer(BasicInterface):
         self.block = block
 
     def visualize(self, U, discretization, title=None, legend=None, separate_colorbars=False,
-                  block=None, filename=None, columns=2):
+                  rescale_colorbars=False, block=None, filename=None, columns=2):
         """Visualize the provided data.
 
         Parameters
@@ -433,15 +462,18 @@ class PatchVisualizer(BasicInterface):
             Description of the data that is plotted. Most useful if `U` is a tuple in which
             case `legend` has to be a tuple of strings of the same length.
         separate_colorbars
-            If `True` use separate colorbars for each subplot.
+            If `True`, use separate colorbars for each subplot.
+        rescale_colorbars
+            If `True`, rescale colorbars to data in each frame.
         block
-            If `True` block execution until the plot window is closed. If `None`, use the
+            If `True`, block execution until the plot window is closed. If `None`, use the
             default provided during instantiation.
         filename
             If specified, write the data to a VTK-file using
             :func:`pymor.tools.vtkio.write_vtk` instead of displaying it.
         columns
-            The number of columns in the visualizer GUI. This is only used if `U` is a tuple.
+            The number of columns in the visualizer GUI in case multiple plots are displayed
+            at the same time.
         """
         assert isinstance(U, VectorArrayInterface) and hasattr(U, 'data') \
             or (isinstance(U, tuple) and all(isinstance(u, VectorArrayInterface) and hasattr(u, 'data') for u in U)
@@ -455,8 +487,8 @@ class PatchVisualizer(BasicInterface):
         else:
             block = self.block if block is None else block
             visualize_patch(self.grid, U, bounding_box=self.bounding_box, codim=self.codim, title=title,
-                            legend=legend, separate_colorbars=separate_colorbars, backend=self.backend,
-                            block=block, columns=columns)
+                            legend=legend, separate_colorbars=separate_colorbars, rescale_colorbars=rescale_colorbars,
+                            backend=self.backend, block=block, columns=columns)
 
 
 class Matplotlib1DVisualizer(BasicInterface):
@@ -472,7 +504,7 @@ class Matplotlib1DVisualizer(BasicInterface):
     codim
         The codimension of the entities the data in `U` is attached to (either 0 or 1).
     block
-        If `True` block execution until the plot window is closed.
+        If `True`, block execution until the plot window is closed.
     """
 
     def __init__(self, grid, codim=1, block=False):

@@ -2,6 +2,12 @@
 # Copyright Holders: Rene Milk, Stephan Rave, Felix Schindler
 # License: BSD 2-Clause License (http://opensource.org/licenses/BSD-2-Clause)
 
+"""This module imports some commonly used methods and classes.
+
+You can use ``from pymor.basic import *`` in interactive session
+to have the most important parts of pyMOR directly available.
+"""
+
 from pymor.algorithms.basisextension import trivial_basis_extension, gram_schmidt_basis_extension, pod_basis_extension
 from pymor.algorithms.ei import interpolate_operators, ei_greedy, deim
 from pymor.algorithms.greedy import greedy
@@ -24,7 +30,7 @@ from pymor.domaindescriptions.boundarytypes import BoundaryType
 from pymor.domaindiscretizers.default import discretize_domain_default
 
 from pymor.discretizers.advection import discretize_nonlinear_instationary_advection_fv
-from pymor.discretizers.elliptic import discretize_elliptic_cg
+from pymor.discretizers.elliptic import discretize_elliptic_cg, discretize_elliptic_fv
 
 from pymor.functions.basic import ConstantFunction, GenericFunction, ExpressionFunction, LincombFunction
 

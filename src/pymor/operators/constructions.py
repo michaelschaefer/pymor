@@ -13,70 +13,44 @@ from itertools import izip
 import numpy as np
 
 from pymor.core.defaults import defaults_sid
-from pymor.la.interfaces import VectorArrayInterface
+from pymor.la.interfaces import VectorArrayInterface, VectorSpace
 from pymor.la.numpyvectorarray import NumpyVectorArray, NumpyVectorSpace
 from pymor.operators.basic import OperatorBase
 from pymor.operators.interfaces import OperatorInterface
+from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.parameters.interfaces import ParameterFunctionalInterface
-from pymor.parameters.functionals import ProjectionParameterFunctional
 
 
 class LincombOperator(OperatorBase):
-    """A generic |LincombOperator| representing a linear combination of arbitrary |Operators|.
+    """An operator representing a linear combination of arbitrary |Operators|.
 
     Parameters
     ----------
     operators
         List of |Operators| whose linear combination is formed.
     coefficients
-        `None` or a list of linear coefficients. A linear coefficient can
+        A list of linear coefficients. A linear coefficient can
         either be a fixed number or a |ParameterFunctional|.
-    num_coefficients
-        If `coefficients` is `None`, the number of linear coefficients (starting
-        at index 0) which are given by the |Parameter| component with name
-        `'coefficients_name'`. The missing coefficients are set to `1`.
-    coefficients_name
-        If `coefficients` is `None`, the name of the |Parameter| component providing
-        the linear coefficients.
     name
         Name of the operator.
     """
 
-    with_arguments = frozenset(('operators', 'coefficients', 'name'))
-
-    def __init__(self, operators, coefficients=None, num_coefficients=None, coefficients_name=None, name=None):
-        assert coefficients is None or len(operators) == len(coefficients)
+    def __init__(self, operators, coefficients, name=None):
         assert len(operators) > 0
+        assert len(operators) == len(coefficients)
         assert all(isinstance(op, OperatorInterface) for op in operators)
-        assert coefficients is None or all(isinstance(c, (ParameterFunctionalInterface, Number)) for c in coefficients)
+        assert all(isinstance(c, (ParameterFunctionalInterface, Number)) for c in coefficients)
         assert all(op.source == operators[0].source for op in operators[1:])
         assert all(op.range == operators[0].range for op in operators[1:])
-        assert coefficients is None or num_coefficients is None
-        assert coefficients is None or coefficients_name is None
-        assert coefficients is not None or coefficients_name is not None
-        assert coefficients_name is None or isinstance(coefficients_name, str)
         self.source = operators[0].source
         self.range = operators[0].range
         self.operators = operators
         self.linear = all(op.linear for op in operators)
-        if coefficients is None:
-            num_coefficients = num_coefficients if num_coefficients is not None else len(operators)
-            pad_coefficients = len(operators) - num_coefficients
-            coefficients = [ProjectionParameterFunctional(coefficients_name, (num_coefficients,), i)
-                            for i in range(num_coefficients)] + [1.] * pad_coefficients
         self.coefficients = coefficients
         self.name = name
         self.build_parameter_type(inherits=list(operators) +
                                   [f for f in coefficients if isinstance(f, ParameterFunctionalInterface)])
         self._try_assemble = not self.parametric
-
-    def with_(self, **kwargs):
-        assert set(kwargs.keys()) <= self.with_arguments
-        operators = kwargs.get('operators', self.operators)
-        coefficients = kwargs.get('coefficients', self.coefficients)
-        assert len(operators) == len(self.operators)
-        assert len(coefficients) == len(self.coefficients)
-        return LincombOperator(operators, coefficients, name=kwargs.get('name', self.name))
 
     def evaluate_coefficients(self, mu):
         """Compute the linear coefficients of the linear combination for a given parameter.
@@ -232,8 +206,6 @@ class Concatenation(OperatorBase):
         self.source = first.source
         self.range = second.range
         self.linear = second.linear and first.linear
-        if hasattr(first, 'restricted') and hasattr(second, 'restricted'):
-            self.restricted = self._restricted
         self.name = name
 
     def apply(self, U, ind=None, mu=None):
@@ -245,15 +217,15 @@ class Concatenation(OperatorBase):
         return self.first.apply_adjoint(self.second.apply_adjoint(U, ind=ind, mu=mu, range_product=range_product),
                                         mu=mu, source_product=source_product)
 
-    def _restricted(self, components):
-        restricted_second, second_source_components = self.second.restricted(components)
-        restricted_first, first_source_components = self.first.restricted(second_source_components)
+    def restricted(self, dofs):
+        restricted_second, second_source_dofs = self.second.restricted(dofs)
+        restricted_first, first_source_dofs = self.first.restricted(second_source_dofs)
         if isinstance(restricted_second, IdentityOperator):
-            return restricted_first, first_source_components
+            return restricted_first, first_source_dofs
         elif isinstance(restricted_first, IdentityOperator):
-            return restricted_second, first_source_components
+            return restricted_second, first_source_dofs
         else:
-            return Concatenation(restricted_second, restricted_first), first_source_components
+            return Concatenation(restricted_second, restricted_first), first_source_dofs
 
 
 class ComponentProjection(OperatorBase):
@@ -283,10 +255,10 @@ class ComponentProjection(OperatorBase):
         assert U in self.source
         return NumpyVectorArray(U.components(self.components, ind), copy=False)
 
-    def restricted(self, components):
-        assert all(0 <= c < self.range.dim for c in components)
-        source_components = self.components[components]
-        return IdentityOperator(NumpyVectorSpace(len(source_components))), source_components
+    def restricted(self, dofs):
+        assert all(0 <= c < self.range.dim for c in dofs)
+        source_dofs = self.components[dofs]
+        return IdentityOperator(NumpyVectorSpace(len(source_dofs))), source_dofs
 
 
 class IdentityOperator(OperatorBase):
@@ -360,6 +332,11 @@ class ConstantOperator(OperatorBase):
         count = len(U) if ind is None else 1 if isinstance(ind, Number) else len(ind)
         return self._value.copy(ind=([0] * count))
 
+    def jacobian(self, U, mu=None):
+        assert U in self.source
+        assert len(U) == 1
+        return ZeroOperator(self.source, self.range, name=self.name + '_jacobian')
+
     def projected(self, source_basis, range_basis, product=None, name=None):
         assert source_basis is None or source_basis in self.source
         assert range_basis is None or range_basis in self.range
@@ -378,6 +355,53 @@ class ConstantOperator(OperatorBase):
         else:
             return ConstantOperator(projected_value, NumpyVectorSpace(len(source_basis)), copy=False,
                                     name=self.name + '_projected')
+
+
+class ZeroOperator(OperatorBase):
+    """The |Operator| which maps every vector to zero.
+
+    Parameters
+    ----------
+    source
+        Source |VectorSpace| of the operator.
+    range
+        Range |VectorSpace| of the operator.
+    name
+        Name of the operator.
+    """
+
+    linear = True
+
+    def __init__(self, source, range, name=None):
+        assert isinstance(source, VectorSpace)
+        assert isinstance(range, VectorSpace)
+        self.source = source
+        self.range = range
+        self.name = name
+
+    def apply(self, U, ind=None, mu=None):
+        assert U in self.source
+        count = len(U) if ind is None else 1 if isinstance(ind, Number) else len(ind)
+        return self.range.zeros(count)
+
+    def projected(self, source_basis, range_basis, product=None, name=None):
+        assert source_basis is None or source_basis in self.source
+        assert range_basis is None or range_basis in self.range
+        assert product is None or product.source == product.range == self.range
+        if source_basis is not None and range_basis is not None:
+            return NumpyMatrixOperator(np.zeros((len(range_basis), len(source_basis))),
+                                       name=self.name + '_projected')
+        else:
+            new_source = NumpyVectorSpace(len(source_basis)) if source_basis is not None else self.source
+            new_range = NumpyVectorSpace(len(range_basis)) if range_basis is not None else self.source
+            return ZeroOperator(new_source, new_range, name=self.name + '_projected')
+
+    def assemble_lincomb(self, operators, coefficients, name=None):
+        assert operators[0] is self
+        if len(operators) > 1:
+            return operators[1].assemble_lincomb(operators[1:], coefficients[1:], name=name)
+        else:
+            return self
 
 
 class VectorArrayOperator(OperatorBase):

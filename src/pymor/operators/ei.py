@@ -12,7 +12,9 @@ from scipy.linalg import solve_triangular
 from pymor.la.interfaces import VectorArrayInterface
 from pymor.la.numpyvectorarray import NumpyVectorArray, NumpyVectorSpace
 from pymor.operators.basic import OperatorBase
+from pymor.operators.constructions import VectorArrayOperator, Concatenation, ComponentProjection, ZeroOperator
 from pymor.operators.interfaces import OperatorInterface
+from pymor.operators.numpy import NumpyMatrixOperator
 
 
 class EmpiricalInterpolatedOperator(OperatorBase):
@@ -30,12 +32,11 @@ class EmpiricalInterpolatedOperator(OperatorBase):
       |   ψ_(c_i)(L_EI(U, μ)) = ψ_(c_i)(L(U, μ))   for i=0,...,M
 
     Since the original operator only has to be evaluated at the given interpolation
-    DOFs, |EmpiricalInterpolatedOperator| calls `operator.restricted(interpolation_dofs)`
+    DOFs, |EmpiricalInterpolatedOperator| calls
+    :meth:`~pymor.operators.interfaces.Operatorinterface.restricted`(interpolation_dofs)`
     to obtain a restricted version of the operator which is stored and later used
-    to quickly obtain the required evaluations. (The second return value of the `restricted`
-    method has to be an array of source DOFs -- determined by the operator's stencil --
-    required to evaluate the restricted operator.) If the operator fails to have
-    a `restricted` method, the full operator will be evaluated (which will lead to
+    to quickly obtain the required evaluations. If the `restricted` method, is not
+    implemented, the full operator will be evaluated (which will lead to
     the same result, but without any speedup).
 
     The interpolation DOFs and the collateral basis can be generated using
@@ -74,9 +75,9 @@ class EmpiricalInterpolatedOperator(OperatorBase):
         self.triangular = triangular
 
         if len(interpolation_dofs) > 0:
-            if hasattr(operator, 'restricted'):
+            try:
                 self.restricted_operator, self.source_dofs  = operator.restricted(interpolation_dofs)
-            else:
+            except NotImplementedError:
                 self.logger.warn('Operator has no "restricted" method. The full operator will be evaluated.')
                 self.operator = operator
             interpolation_matrix = collateral_basis.components(interpolation_dofs).T
@@ -109,36 +110,61 @@ class EmpiricalInterpolatedOperator(OperatorBase):
         assert range_basis is None or range_basis in self.range
         assert product is None or product.source == product.range == self.range
 
-        if not hasattr(self, 'restricted_operator') or source_basis is None:
+        if len(self.interpolation_dofs) == 0:
+            return ZeroOperator(self.source, self.range, self.name).projected(source_basis, range_basis, product, name)
+        elif not hasattr(self, 'restricted_operator') or source_basis is None:
             return super(EmpiricalInterpolatedOperator, self).projected(source_basis, range_basis, product, name)
-
-        name = name or self.name + '_projected'
-
-        if range_basis is not None:
-            if product is None:
-                projected_collateral_basis = NumpyVectorArray(self.collateral_basis.dot(range_basis, pairwise=False))
-            else:
-                projected_collateral_basis = NumpyVectorArray(product.apply2(self.collateral_basis, range_basis,
-                                                                             pairwise=False))
         else:
-            projected_collateral_basis = self.collateral_basis
+            name = name or self.name + '_projected'
 
-        return ProjectedEmpiciralInterpolatedOperator(self.restricted_operator, self.interpolation_matrix,
-                                                      NumpyVectorArray(source_basis.components(self.source_dofs),
-                                                                       copy=False),
-                                                      projected_collateral_basis, self.triangular, name)
+            if range_basis is not None:
+                if product is None:
+                    projected_collateral_basis = NumpyVectorArray(self.collateral_basis.dot(range_basis,
+                                                                                            pairwise=False))
+                else:
+                    projected_collateral_basis = NumpyVectorArray(product.apply2(self.collateral_basis, range_basis,
+                                                                                 pairwise=False))
+            else:
+                projected_collateral_basis = self.collateral_basis
+
+            return ProjectedEmpiciralInterpolatedOperator(self.restricted_operator, self.interpolation_matrix,
+                                                          NumpyVectorArray(source_basis.components(self.source_dofs),
+                                                                           copy=False),
+                                                          projected_collateral_basis, self.triangular, name)
 
     def jacobian(self, U, mu=None):
         mu = self.parse_parameter(mu)
-        if hasattr(self, 'operator'):
+
+        if len(self.interpolation_dofs) == 0:
+            if self.source.type == self.range.type == NumpyVectorArray:
+                return NumpyMatrixOperator(np.zeros((0, self.source.dim)), name=self.name + '_jacobian')
+            else:
+                return ZeroOperator(self.source, self.range, name=self.name + '_jacobian')
+        elif hasattr(self, 'operator'):
             return EmpiricalInterpolatedOperator(self.operator.jacobian(U, mu=mu), self.interpolation_dofs,
                                                  self.collateral_basis, self.triangular, self.name + '_jacobian')
         else:
-            raise NotImplementedError
+            U_components = NumpyVectorArray(U.components(self.source_dofs), copy=False)
+            JU = self.restricted_operator.jacobian(U_components, mu=mu) \
+                                         .apply(NumpyVectorArray(np.eye(len(self.source_dofs)), copy=False))
+            try:
+                if self.triangular:
+                    interpolation_coefficients = solve_triangular(self.interpolation_matrix, JU.data.T,
+                                                                  lower=True, unit_diagonal=True).T
+                else:
+                    interpolation_coefficients = np.linalg.solve(self.interpolation_matrix, JU._array.T).T
+            except ValueError:  # this exception occurs when AU contains NaNs ...
+                interpolation_coefficients = np.empty((len(JU), len(self.collateral_basis))) + np.nan
+            J = self.collateral_basis.lincomb(interpolation_coefficients)
+            if isinstance(J, NumpyVectorArray):
+                J = NumpyMatrixOperator(J.data.T)
+            else:
+                J = VectorArrayOperator(J, copy=False)
+            return Concatenation(J, ComponentProjection(self.source_dofs, self.source), name=self.name + '_jacobian')
 
 
 class ProjectedEmpiciralInterpolatedOperator(OperatorBase):
-    """Project an |EmpiricalInterpolatedOperator|.
+    """A projected |EmpiricalInterpolatedOperator|.
 
     Not intended to be used directly. Instead use :meth:`~pymor.operators.interfaces.OperatorInterface.projected`.
     """
@@ -170,6 +196,26 @@ class ProjectedEmpiciralInterpolatedOperator(OperatorBase):
         except ValueError:  # this exception occurs when AU contains NaNs ...
             interpolation_coefficients = np.empty((len(AU), len(self.projected_collateral_basis))) + np.nan
         return self.projected_collateral_basis.lincomb(interpolation_coefficients)
+
+    def jacobian(self, U, mu=None):
+        assert len(U) == 1
+        mu = self.parse_parameter(mu)
+        U_components = self.source_basis_dofs.lincomb(U.data[0])
+        J = self.restricted_operator.jacobian(U_components, mu=mu).apply(self.source_basis_dofs)
+        try:
+            if self.triangular:
+                interpolation_coefficients = solve_triangular(self.interpolation_matrix, J.data.T,
+                                                              lower=True, unit_diagonal=True).T
+            else:
+                interpolation_coefficients = np.linalg.solve(self.interpolation_matrix, J.data.T).T
+        except ValueError:  # this exception occurs when J contains NaNs ...
+            interpolation_coefficients = (np.empty((len(self.projected_collateral_basis), len(self.source_basis_dofs)))
+                                          + np.nan)
+        M = self.projected_collateral_basis.lincomb(interpolation_coefficients)
+        if isinstance(M, NumpyVectorArray):
+            return NumpyMatrixOperator(M.data.T)
+        else:
+            return VectorArrayOperator(M)
 
     def projected_to_subbasis(self, dim_source=None, dim_range=None, dim_collateral=None, name=None):
         assert dim_source is None or dim_source <= self.source.dim

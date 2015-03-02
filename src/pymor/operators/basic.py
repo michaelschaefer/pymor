@@ -18,7 +18,11 @@ from pymor.operators.interfaces import OperatorInterface
 
 
 class OperatorBase(OperatorInterface):
-    """Base class for |Operators| providing some default implementations."""
+    """Base class for |Operators| providing some default implementations.
+
+    When implementing a new operator, it is usually advisable to derive
+    from this class.
+    """
 
     def apply2(self, V, U, pairwise, U_ind=None, V_ind=None, mu=None, product=None):
         mu = self.parse_parameter(mu)
@@ -45,11 +49,12 @@ class OperatorBase(OperatorInterface):
             raise NotImplementedError
 
     @staticmethod
-    def lincomb(operators, coefficients=None, num_coefficients=None, coefficients_name=None, name=None):
+    def lincomb(operators, coefficients, name=None):
         import warnings
-        warnings.warn('OperatorInterface.lincomb is deprecated! Use pymor.operators.constructions.lincomb instead.')
+        warnings.warn('OperatorInterface.lincomb is deprecated!'
+                      + 'Use pymor.operators.constructions.LincombOperator instead.')
         from pymor.operators.constructions import LincombOperator
-        op = LincombOperator(operators, coefficients, num_coefficients, coefficients_name, name=None)
+        op = LincombOperator(operators, coefficients, name=None)
         if op.parametric:
             return op
         else:
@@ -188,18 +193,16 @@ class ProjectedOperator(OperatorBase):
 
     def __init__(self, operator, source_basis, range_basis, product=None, copy=True, name=None):
         assert isinstance(operator, OperatorInterface)
-        assert source_basis is None and issubclass(operator.source.type, NumpyVectorArray) \
-            or source_basis in operator.source
-        assert range_basis is None and issubclass(operator.range.type, NumpyVectorArray) \
-            or range_basis in operator.range
+        assert source_basis is None or source_basis in operator.source
+        assert range_basis is None or range_basis in operator.range
         assert product is None \
             or (isinstance(product, OperatorInterface)
                 and range_basis is not None
                 and operator.range == product.source
                 and product.range == product.source)
         self.build_parameter_type(inherits=(operator,))
-        self.source = NumpyVectorSpace(len(source_basis) if source_basis is not None else operator.source.dim)
-        self.range = NumpyVectorSpace(len(range_basis) if range_basis is not None else operator.range.dim)
+        self.source = NumpyVectorSpace(len(source_basis)) if source_basis is not None else operator.source
+        self.range = NumpyVectorSpace(len(range_basis)) if range_basis is not None else operator.range
         self.name = name
         self.operator = operator
         self.source_basis = source_basis.copy() if source_basis is not None and copy else source_basis

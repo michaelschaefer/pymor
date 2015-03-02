@@ -3,7 +3,7 @@
 # License: BSD 2-Clause License (http://opensource.org/licenses/BSD-2-Clause)
 
 """ This module provides a widget for displaying patch plots of
-scalar data assigned to a 2D-Grid using OpenGL. This widget is not
+scalar data assigned to 2D-grids using OpenGL. This widget is not
 intended to be used directly. Instead, use
 :meth:`~pymor.gui.qt.visualize_patch` or
 :class:`~pymor.gui.qt.PatchVisualizer`.
@@ -145,7 +145,7 @@ if HAVE_ALL:
             self.vertices_id = gl.glGenBuffers(1)
             gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vertices_id)
             gl.glBufferData(gl.GL_ARRAY_BUFFER, self.vertex_data, gl.GL_DYNAMIC_DRAW)
-            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0 )
+            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
 
             self.indices_id = gl.glGenBuffers(1)
             gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.indices_id)
@@ -192,7 +192,10 @@ if HAVE_ALL:
             self.update_vbo = True
             self.update()
 
-        def set(self, U):
+        def set(self, U, vmin=None, vmax=None):
+            self.vmin = self.vmin if vmin is None else vmin
+            self.vmax = self.vmax if vmax is None else vmax
+
             U_buffer = self.vertex_data['color']
             if self.codim == 2:
                 U_buffer[:] = U[self.entity_map]
@@ -234,8 +237,12 @@ if HAVE_ALL:
             fm = QFontMetrics(self.font())
             self.vmin = vmin if vmin is not None else (np.min(U) if U is not None else 0.)
             self.vmax = vmax if vmax is not None else (np.max(U) if U is not None else 1.)
-            precision = m.log(max(abs(self.vmin), abs(self.vmax) / abs(self.vmin - self.vmax)), 10) + 1
-            precision = int(min(max(precision, 3), 8))
+            difference = abs(self.vmin - self.vmax)
+            if difference == 0:
+                precision = 3
+            else:
+                precision = m.log(max(abs(self.vmin), abs(self.vmax)) / difference, 10) + 1
+                precision = int(min(max(precision, 3), 8))
             self.vmin_str = format(('{:.' + str(precision) + '}').format(self.vmin))
             self.vmax_str = format(('{:.' + str(precision) + '}').format(self.vmax))
             self.vmin_width = fm.width(self.vmin_str)
@@ -246,7 +253,8 @@ if HAVE_ALL:
             self.setMinimumSize(max(self.vmin_width, self.vmax_width) + 20, 300)
             self.update()
 
-        def paintGL(self):
+        def paintEvent(self, event):
+            self.makeCurrent()
             gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
             gl.glUseProgram(self.shaders_program)
 

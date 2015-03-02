@@ -182,31 +182,34 @@ class NumpyVector(VectorInterface):
 
 
 class ListVectorArray(VectorArrayInterface):
-    """|VectorArray| implementation via a python list of vectors."""
+    """|VectorArray| implementation via a python list of vectors.
 
-    __NONE = tuple()
-    vector_type = None
+    The subtypes a ListVectorArray can have are tuples
+    `(vector_type, vector_subtype)` where `vector_type` is a
+    subclass of VectorInterface and `vector_subtype` is a valid
+    subtype for `vector_type`.
+    """
 
-    def __init__(self, vectors, subtype=__NONE, copy=True):
+    _NONE = tuple()
+
+    def __init__(self, vectors, subtype=_NONE, copy=True):
+        vectors = list(vectors)
+        if subtype is self._NONE:
+            assert len(vectors) > 0
+            subtype = (type(vectors[0]), vectors[0].subtype)
         if not copy:
-            if isinstance(vectors, list):
-                self._list = vectors
-            else:
-                self._list = list(vectors)
+            self._list = vectors
         else:
             self._list = [v.copy() for v in vectors]
-        if subtype is self.__NONE:
-            assert len(self._list) > 0
-            subtype = self._list[0].subtype
-        self._subtype = subtype
-        assert all(v.subtype == subtype for v in self._list)
+        self.vector_type, self.vector_subtype = vector_type, vector_subtype = subtype
+        assert all(v.subtype == vector_subtype for v in self._list)
 
     @classmethod
     def make_array(cls, subtype=None, count=0, reserve=0):
         assert count >= 0
         assert reserve >= 0
-        vector_type = cls.vector_type
-        return cls([vector_type.make_zeros(subtype) for _ in xrange(count)], subtype=subtype, copy=False)
+        vector_type, vector_subtype = subtype
+        return cls([vector_type.make_zeros(vector_subtype) for _ in xrange(count)], subtype=subtype, copy=False)
 
     def __len__(self):
         return len(self._list)
@@ -225,11 +228,11 @@ class ListVectorArray(VectorArrayInterface):
         if len(self._list) > 0:
             return self._list[0].dim
         else:
-            return self.vector_type.make_zeros(self._subtype).dim
+            return self.vector_type.make_zeros(self.vector_subtype).dim
 
     @property
     def subtype(self):
-        return self._subtype
+        return (self.vector_type, self.vector_subtype)
 
     def copy(self, ind=None):
         assert self.check_ind(ind)
@@ -356,23 +359,36 @@ class ListVectorArray(VectorArrayInterface):
 
     def scal(self, alpha, ind=None):
         assert self.check_ind_unique(ind)
-        assert isinstance(alpha, Number)
+        assert isinstance(alpha, Number) \
+            or isinstance(alpha, np.ndarray) and alpha.shape == (self.len_ind(ind),)
 
         if ind is None:
-            for v in self._list:
-                v.scal(alpha)
+            if isinstance(alpha, np.ndarray):
+                for a, v in izip(alpha, self._list):
+                    v.scal(a)
+            else:
+                for v in self._list:
+                    v.scal(alpha)
         elif isinstance(ind, Number):
+            if isinstance(alpha, np.ndarray):
+                alpha = alpha[0]
             self._list[ind].scal(alpha)
         else:
             l = self._list
-            for i in ind:
-                l[i].scal(alpha)
+            if isinstance(alpha, np.ndarray):
+                for a, i in zip(alpha, ind):
+                    l[i].scal(a)
+            else:
+                for i in ind:
+                    l[i].scal(alpha)
 
     def axpy(self, alpha, x, ind=None, x_ind=None):
         assert self.check_ind_unique(ind)
         assert x.check_ind(x_ind)
         assert self.space == x.space
-        assert self.len_ind(ind) == x.len_ind(x_ind)
+        assert self.len_ind(ind) == x.len_ind(x_ind) or x.len_ind(x_ind) == 1
+        assert isinstance(alpha, Number) \
+            or isinstance(alpha, np.ndarray) and alpha.shape == (self.len_ind(ind),)
 
         if self is x:
             if ind is None or x_ind is None:
@@ -404,16 +420,24 @@ class ListVectorArray(VectorArrayInterface):
             X = (x._list[i] for i in x_ind)
             len_X = len(x_ind)
 
-        if alpha == 0:
+        if np.all(alpha == 0):
             return
         elif len_X == 1:
             xx = next(X)
-            for y in Y:
-                y.axpy(alpha, xx)
+            if isinstance(alpha, np.ndarray):
+                for a, y in izip(alpha, Y):
+                    y.axpy(a, xx)
+            else:
+                for y in Y:
+                    y.axpy(alpha, xx)
         else:
             assert len_X == len_Y
-            for xx, y in izip(X, Y):
-                y.axpy(alpha, xx)
+            if isinstance(alpha, np.ndarray):
+                for a, xx, y in izip(alpha, X, Y):
+                    y.axpy(a, xx)
+            else:
+                for xx, y in izip(X, Y):
+                    y.axpy(alpha, xx)
 
     def dot(self, other, pairwise, ind=None, o_ind=None):
         assert self.check_ind(ind)
@@ -487,12 +511,12 @@ class ListVectorArray(VectorArrayInterface):
 
         RL = []
         for coeffs in coefficients:
-            R = self.vector_type.make_zeros(self._subtype)
+            R = self.vector_type.make_zeros(self.vector_subtype)
             for v, c in izip(V, coeffs):
                 R.axpy(c, v)
             RL.append(R)
 
-        return type(self)(RL, subtype=self._subtype, copy=False)
+        return type(self)(RL, subtype=self.subtype, copy=False)
 
     def l1_norm(self, ind=None):
         assert self.check_ind(ind)
@@ -556,8 +580,3 @@ class ListVectorArray(VectorArrayInterface):
 
     def __str__(self):
         return 'ListVectorArray of {} {}s of dimension {}'.format(len(self._list), str(self.vector_type), self.dim)
-
-
-class NumpyListVectorArray(ListVectorArray):
-
-    vector_type = NumpyVector

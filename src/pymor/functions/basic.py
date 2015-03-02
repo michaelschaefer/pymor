@@ -21,7 +21,7 @@ class FunctionBase(FunctionInterface):
 
     def __add__(self, other):
         """Returns a new :class:`LincombFunction` representing the sum of two functions, or
-        one function and a constant.
+        of one function and a constant.
         """
         if isinstance(other, Number) and other == 0:
             return self
@@ -37,7 +37,7 @@ class FunctionBase(FunctionInterface):
 
     def __sub__(self, other):
         """Returns a new :class:`LincombFunction` representing the difference of two functions, or
-        one function and a constant.
+        of one function and a constant.
         """
         if isinstance(other, FunctionInterface):
             return LincombFunction([self, other], [1., -1.])
@@ -97,19 +97,24 @@ class ConstantFunction(FunctionBase):
 
 
 class GenericFunction(FunctionBase):
-    """Wrapper making an arbitrary Python function between |NumPy arrays| a
-    proper |Function|
+    """Wrapper making an arbitrary Python function between |NumPy arrays| a proper |Function|.
+
+    Note that a GenericFunction can only be :mod:`~pymor.core.pickle`d
+    if the function it is wrapping can be serialized. If normal pickling of the
+    function fails, serialization using :func:`~pymor.core.pickle.dumps_function`
+    will be tried as a last resort. For this reason, it is usually preferable to
+    use ExpressionFunction instead, which always can be serialized.
 
     Parameters
     ----------
     mapping
         The function to wrap. If `parameter_type` is `None`, the function is of
-        the form `mapping(x)` and is expected to vectorized. In particular::
+        the form `mapping(x)`. If `parameter_type` is not `None`, the function has
+        to have the signature `mapping(x, mu)`. Moreover, the function is expected
+        to be vectorized, i.e.::
 
             mapping(x).shape == x.shape[:-1] + shape_range.
 
-        If `parameter_type` is not `None`, the function has to have the signature
-        `mapping(x, mu)`.
     dim_domain
         The dimension of the domain.
     shape_range
@@ -180,7 +185,8 @@ class ExpressionFunction(GenericFunction):
     Parameters
     ----------
     expression
-        The Python expression of one variable `x` as a string.
+        A Python expression of one variable `x` and a parameter `mu` given as
+        a string.
     dim_domain
         The dimension of the domain.
     shape_range
@@ -225,15 +231,8 @@ class LincombFunction(FunctionBase):
     functions
         List of |Functions| whose linear combination is formed.
     coefficients
-        `None` or a list of linear coefficients.
-    num_coefficients
-        If `coefficients` is `None`, the number of linear
-        coefficients (starting at index 0) which are given by the
-        |Parameter| component with name `'coefficients_name'`. The
-        missing coefficients are set to `1`.
-    coefficients_name
-        If `coefficients` is `None`, the name of the |Parameter|
-        component providing the linear coefficients.
+        A list of linear coefficients. A linear coefficient can
+        either be a fixed number or a |ParameterFunctional|.
     name
         Name of the function.
 
@@ -241,47 +240,27 @@ class LincombFunction(FunctionBase):
     ----------
     functions
     coefficients
-    coefficients_name
-    num_coefficients
     """
 
-    def __init__(self, functions, coefficients=None, num_coefficients=None, coefficients_name=None, name=None):
-        assert coefficients is None or len(functions) == len(coefficients)
+    def __init__(self, functions, coefficients, name=None):
         assert len(functions) > 0
+        assert len(functions) == len(coefficients)
         assert all(isinstance(f, FunctionInterface) for f in functions)
-        assert coefficients is None or all(isinstance(c, (ParameterFunctionalInterface, Number)) for c in coefficients)
+        assert all(isinstance(c, (ParameterFunctionalInterface, Number)) for c in coefficients)
         assert all(f.dim_domain == functions[0].dim_domain for f in functions[1:])
         assert all(f.shape_range == functions[0].shape_range for f in functions[1:])
-        assert coefficients is None or num_coefficients is None
-        assert coefficients is None or coefficients_name is None
-        assert coefficients is not None or coefficients_name is not None
-        assert coefficients_name is None or isinstance(coefficients_name, str)
         self.dim_domain = functions[0].dim_domain
         self.shape_range = functions[0].shape_range
         self.functions = functions
         self.coefficients = coefficients
-        self.coefficients_name = coefficients_name
         self.name = name
-        if coefficients is None:
-            self.num_coefficients = num_coefficients if num_coefficients is not None else len(functions)
-            self.pad_coefficients = len(functions) - self.num_coefficients
-            self.build_parameter_type({'coefficients': self.num_coefficients}, inherits=list(functions),
-                                      global_names={'coefficients': coefficients_name})
-        else:
-            self.build_parameter_type(inherits=list(functions) +
-                                      [f for f in coefficients if isinstance(f, ParameterFunctionalInterface)])
+        self.build_parameter_type(inherits=list(functions) +
+                                  [f for f in coefficients if isinstance(f, ParameterFunctionalInterface)])
 
     def evaluate_coefficients(self, mu):
         """Compute the linear coefficients for a given |Parameter| `mu`."""
         mu = self.parse_parameter(mu)
-        if self.coefficients is None:
-            if self.pad_coefficients:
-                return np.concatenate((self.local_parameter(mu)['coefficients'], np.ones(self.pad_coefficients)))
-            else:
-                return self.local_parameter(mu)['coefficients']
-
-        else:
-            return np.array([c.evaluate(mu) if hasattr(c, 'evaluate') else c for c in self.coefficients])
+        return np.array([c.evaluate(mu) if hasattr(c, 'evaluate') else c for c in self.coefficients])
 
     def evaluate(self, x, mu=None):
         mu = self.parse_parameter(mu)
