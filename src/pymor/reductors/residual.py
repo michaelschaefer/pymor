@@ -6,15 +6,15 @@ from __future__ import absolute_import, division, print_function
 
 import numpy as np
 
+from pymor.algorithms.gram_schmidt import gram_schmidt
 from pymor.core.interfaces import ImmutableInterface
 from pymor.core.logger import getLogger
-from pymor.la.numpyvectorarray import NumpyVectorSpace
 from pymor.la.basic import induced_norm
-from pymor.la.gram_schmidt import gram_schmidt
 from pymor.operators.basic import OperatorBase
 from pymor.operators.constructions import LincombOperator
 from pymor.operators.ei import EmpiricalInterpolatedOperator
 from pymor.reductors.basic import GenericRBReconstructor
+from pymor.vectorarrays.numpy import NumpyVectorSpace
 
 
 def reduce_residual(operator, functional=None, RB=None, product=None, extends=None):
@@ -79,7 +79,7 @@ def reduce_residual(operator, functional=None, RB=None, product=None, extends=No
     if RB is None:
         RB = operator.source.empty()
 
-    if extends and isinstance(extends[0], NonProjectedResiudalOperator):
+    if extends and isinstance(extends[0], NonProjectedResidualOperator):
         extends = None
     if extends:
         residual_range = extends[1].RB.copy()
@@ -127,7 +127,7 @@ def reduce_residual(operator, functional=None, RB=None, product=None, extends=No
         except CollectionError as e:
             logger.warn('Cannot compute range of {}. Evaluation will be slow.'.format(e.op))
             operator = operator.projected(RB, None)
-            return (NonProjectedResiudalOperator(operator, functional, product),
+            return (NonProjectedResidualOperator(operator, functional, product),
                     NonProjectedReconstructor(product),
                     {})
 
@@ -178,21 +178,21 @@ class ResidualOperator(OperatorBase):
                                 name=name)
 
 
-class NonProjectedResiudalOperator(ResidualOperator):
+class NonProjectedResidualOperator(ResidualOperator):
     """Returned by :func:`reduce_residual`.
 
     Not to be used directly.
     """
 
     def __init__(self, operator, functional, product):
-        super(NonProjectedResiudalOperator, self).__init__(operator, functional)
+        super(NonProjectedResidualOperator, self).__init__(operator, functional)
         self.product = product
 
     def apply(self, U, ind=None, mu=None):
-        R = super(NonProjectedResiudalOperator, self).apply(U, ind=ind, mu=mu)
+        R = super(NonProjectedResidualOperator, self).apply(U, ind=ind, mu=mu)
         if self.product:
             R_riesz = self.product.apply_inverse(R)
-            return R_riesz * (np.sqrt(R_riesz.dot(R, pairwise=True)) / R_riesz.l2_norm())[0]
+            return R_riesz * (np.sqrt(R_riesz.dot(R)) / R_riesz.l2_norm())[0]
         else:
             return R
 

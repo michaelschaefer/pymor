@@ -13,12 +13,12 @@ from itertools import izip
 import numpy as np
 
 from pymor.core.defaults import defaults_sid
-from pymor.la.interfaces import VectorArrayInterface, VectorSpace
-from pymor.la.numpyvectorarray import NumpyVectorArray, NumpyVectorSpace
 from pymor.operators.basic import OperatorBase
 from pymor.operators.interfaces import OperatorInterface
 from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.parameters.interfaces import ParameterFunctionalInterface
+from pymor.vectorarrays.interfaces import VectorArrayInterface, VectorSpace
+from pymor.vectorarrays.numpy import NumpyVectorArray, NumpyVectorSpace
 
 
 class LincombOperator(OperatorBase):
@@ -343,10 +343,9 @@ class ConstantOperator(OperatorBase):
         assert product is None or product.source == product.range == self.range
         if range_basis is not None:
             if product:
-                projected_value = NumpyVectorArray(product.apply2(range_basis, self._value, pairwise=False).T,
-                                                   copy=False)
+                projected_value = NumpyVectorArray(product.apply2(range_basis, self._value).T, copy=False)
             else:
-                projected_value = NumpyVectorArray(range_basis.dot(self._value, pairwise=False).T, copy=False)
+                projected_value = NumpyVectorArray(range_basis.dot(self._value).T, copy=False)
         else:
             projected_value = self._value
         if source_basis is None:
@@ -447,7 +446,7 @@ class VectorArrayOperator(OperatorBase):
                 U = U.copy(ind)
             return self._array.lincomb(U.data)
         else:
-            return NumpyVectorArray(U.dot(self._array, ind=ind, pairwise=False), copy=False)
+            return NumpyVectorArray(U.dot(self._array, ind=ind), copy=False)
 
     def apply_adjoint(self, U, ind=None, mu=None, source_product=None, range_product=None):
         assert U in self.range
@@ -455,9 +454,9 @@ class VectorArrayOperator(OperatorBase):
         assert range_product is None or range_product.source == range_product.range == self.range
         if not self.transposed:
             if range_product:
-                ATPrU = NumpyVectorArray(range_product.apply2(self._array, U, U_ind=ind, pairwise=False).T, copy=False)
+                ATPrU = NumpyVectorArray(range_product.apply2(self._array, U, U_ind=ind).T, copy=False)
             else:
-                ATPrU = NumpyVectorArray(self._array.dot(U, o_ind=ind, pairwise=False).T, copy=False)
+                ATPrU = NumpyVectorArray(self._array.dot(U, o_ind=ind).T, copy=False)
             if source_product:
                 return source_product.apply_inverse(ATPrU)
             else:
@@ -608,3 +607,67 @@ class FixedParameterOperator(OperatorBase):
 
     def apply_inverse(self, U, ind=None, mu=None, options=None):
         return self.operator.apply_inverse(U, ind=ind, mu=self.mu, options=options)
+
+
+class SelectionOperator(OperatorBase):
+    """An |Operator| selecting one out of a list of |Operators|.
+
+    operators[i] is used
+    if parameterfunctional(mu) is less or equal than boundaries[i]
+    and greater than boundaries[i-1]::
+
+        -infty ------- boundaries[i] ---------- boundaries[i+1] ------- infty
+                            |                        |
+        --- operators[i] ---|---- operators[i+1] ----|---- operators[i+2]
+                            |                        |
+
+    Parameters
+    ----------
+    operators
+        List of |Operators| from which one |Operator| is
+        selected based on a parameter.
+    parameter_functional
+        A |ParameterFunctional| used for the selection of one |Operator|.
+    boundaries
+        The interval boundaries as defined above.
+    name
+        Name of the operator.
+
+    """
+    def __init__(self, operators, parameter_functional, boundaries, name=None):
+        assert len(operators) > 0
+        assert len(boundaries) == len(operators) - 1
+        # check that boundaries are ascending:
+        for i in range(len(boundaries)-1):
+            assert boundaries[i] <= boundaries[i+1]
+        assert all(isinstance(op, OperatorInterface) for op in operators)
+        assert all(op.source == operators[0].source for op in operators[1:])
+        assert all(op.range == operators[0].range for op in operators[1:])
+        self.source = operators[0].source
+        self.range = operators[0].range
+        self.operators = tuple(operators)
+        self.linear = all(op.linear for op in operators)
+
+        self.name = name
+        self.build_parameter_type(inherits=list(operators) + [parameter_functional])
+        self._try_assemble = not self.parametric
+
+        self.boundaries = tuple(boundaries)
+        self.parameter_functional = parameter_functional
+
+    def _get_operator_number(self, mu):
+        value = self.parameter_functional.evaluate(mu)
+        for i in range(len(self.boundaries)):
+            if self.boundaries[i] >= value:
+                return i
+        return len(self.boundaries)
+
+    def apply(self, U, ind=None, mu=None):
+        mu = self.parse_parameter(mu)
+        operator_number = self._get_operator_number(mu)
+        return self.operators[operator_number].apply(U, ind=ind, mu=mu)
+
+    def as_vector(self, mu=None):
+        mu = self.parse_parameter(mu)
+        operator_number = self._get_operator_number(mu)
+        return self.operators[operator_number].as_vector(mu=mu)

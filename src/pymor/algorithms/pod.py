@@ -9,12 +9,12 @@ from __future__ import absolute_import, division, print_function
 import numpy as np
 from scipy.linalg import eigh
 
+from pymor.algorithms.gram_schmidt import gram_schmidt
 from pymor.core.defaults import defaults
 from pymor.core.exceptions import AccuracyError
-from pymor.la.gram_schmidt import gram_schmidt
-from pymor.la.interfaces import VectorArrayInterface
 from pymor.operators.interfaces import OperatorInterface
 from pymor.tools.floatcmp import float_cmp_all
+from pymor.vectorarrays.interfaces import VectorArrayInterface
 
 
 @defaults('tol', 'symmetrize', 'orthonormalize', 'check', 'check_tol')
@@ -47,7 +47,7 @@ def pod(A, modes=None, product=None, tol=4e-8, symmetrize=False, orthonormalize=
         If `True`, symmetrize the gramian again before proceeding.
     orthonormalize
         If `True`, orthonormalize the computed POD modes again using
-        :func:`la.gram_schmidt.gram_schmidt`.
+        :func:`algorithms.gram_schmidt.gram_schmidt`.
     check
         If `True`, check the computed POD modes for orthonormality.
     check_tol
@@ -66,7 +66,7 @@ def pod(A, modes=None, product=None, tol=4e-8, symmetrize=False, orthonormalize=
     assert modes is None or modes <= len(A)
     assert product is None or isinstance(product, OperatorInterface)
 
-    B = A.gramian() if product is None else product.apply2(A, A, pairwise=False)
+    B = A.gramian() if product is None else product.apply2(A, A)
 
     if symmetrize:     # according to rbmatlab this is necessary due to rounding
         B = B + B.T
@@ -92,13 +92,13 @@ def pod(A, modes=None, product=None, tol=4e-8, symmetrize=False, orthonormalize=
         POD = gram_schmidt(POD, product=product, copy=False)
 
     if check:
-        if not product and not float_cmp_all(POD.dot(POD, pairwise=False), np.eye(len(POD)),
+        if not product and not float_cmp_all(POD.dot(POD), np.eye(len(POD)),
                                              atol=check_tol, rtol=0.):
-            err = np.max(np.abs(POD.dot(POD, pairwise=False) - np.eye(len(POD))))
+            err = np.max(np.abs(POD.dot(POD) - np.eye(len(POD))))
             raise AccuracyError('result not orthogonal (max err={})'.format(err))
-        elif product and not float_cmp_all(product.apply2(POD, POD, pairwise=False), np.eye(len(POD)),
+        elif product and not float_cmp_all(product.apply2(POD, POD), np.eye(len(POD)),
                                            atol=check_tol, rtol=0.):
-            err = np.max(np.abs(product.apply2(POD, POD, pairwise=False) - np.eye(len(POD))))
+            err = np.max(np.abs(product.apply2(POD, POD) - np.eye(len(POD))))
             raise AccuracyError('result not orthogonal (max err={})'.format(err))
         if len(POD) < len(EVECS):
             raise AccuracyError('additional orthonormalization removed basis vectors')

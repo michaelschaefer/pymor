@@ -26,8 +26,8 @@ from pymor.core.defaults import defaults_sid
 from pymor.core.exceptions import InversionError
 from pymor.core.interfaces import abstractmethod
 from pymor.la import numpysolvers
-from pymor.la.numpyvectorarray import NumpyVectorArray, NumpyVectorSpace
 from pymor.operators.basic import OperatorBase
+from pymor.vectorarrays.numpy import NumpyVectorArray, NumpyVectorSpace
 
 
 class NumpyGenericOperator(OperatorBase):
@@ -112,7 +112,7 @@ class NumpyMatrixBasedOperator(OperatorBase):
                 return op
             else:
                 return self._assembled_operator
-        elif self.parameter_type is None:
+        elif not self.parameter_type:
             op = self._assembled_operator = NumpyMatrixOperator(self._assemble())
             self._defaults_sid = defaults_sid()
             return op

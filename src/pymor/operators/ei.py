@@ -9,12 +9,12 @@ import numpy as np
 from scipy.linalg import solve_triangular
 
 
-from pymor.la.interfaces import VectorArrayInterface
-from pymor.la.numpyvectorarray import NumpyVectorArray, NumpyVectorSpace
 from pymor.operators.basic import OperatorBase
 from pymor.operators.constructions import VectorArrayOperator, Concatenation, ComponentProjection, ZeroOperator
 from pymor.operators.interfaces import OperatorInterface
 from pymor.operators.numpy import NumpyMatrixOperator
+from pymor.vectorarrays.interfaces import VectorArrayInterface
+from pymor.vectorarrays.numpy import NumpyVectorArray, NumpyVectorSpace
 
 
 class EmpiricalInterpolatedOperator(OperatorBase):
@@ -119,11 +119,9 @@ class EmpiricalInterpolatedOperator(OperatorBase):
 
             if range_basis is not None:
                 if product is None:
-                    projected_collateral_basis = NumpyVectorArray(self.collateral_basis.dot(range_basis,
-                                                                                            pairwise=False))
+                    projected_collateral_basis = NumpyVectorArray(self.collateral_basis.dot(range_basis))
                 else:
-                    projected_collateral_basis = NumpyVectorArray(product.apply2(self.collateral_basis, range_basis,
-                                                                                 pairwise=False))
+                    projected_collateral_basis = NumpyVectorArray(product.apply2(self.collateral_basis, range_basis))
             else:
                 projected_collateral_basis = self.collateral_basis
 
