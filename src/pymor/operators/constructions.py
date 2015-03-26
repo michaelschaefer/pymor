@@ -2,6 +2,8 @@
 # This file is part of the pyMOR project (http://www.pymor.org).
 # Copyright Holders: Rene Milk, Stephan Rave, Felix Schindler
 # License: BSD 2-Clause License (http://opensource.org/licenses/BSD-2-Clause)
+#
+# Contributors: Andreas Buhr <andreas@andreasbuhr.de>
 
 """Module containing some constructions to obtain new operators from old ones."""
 
@@ -158,23 +160,23 @@ class LincombOperator(OperatorBase):
             R.axpy(c, v)
         return R
 
-    def projected(self, source_basis, range_basis, product=None, name=None):
+    def projected(self, range_basis, source_basis, product=None, name=None):
         if hasattr(self, '_assembled_operator'):
             if self._defaults_sid == defaults_sid():
-                return self._assembled_operator.projected(source_basis, range_basis, product, name)
+                return self._assembled_operator.projected(range_basis, source_basis, product, name)
             else:
-                return self.assemble().projected(source_basis, range_basis, product, name)
+                return self.assemble().projected(range_basis, source_basis, product, name)
         elif self._try_assemble:
-            return self.assemble().projected(source_basis, range_basis, product, name)
-        proj_operators = [op.projected(source_basis=source_basis, range_basis=range_basis, product=product)
+            return self.assemble().projected(range_basis, source_basis, product, name)
+        proj_operators = [op.projected(range_basis=range_basis, source_basis=source_basis, product=product)
                           for op in self.operators]
         return self.with_(operators=proj_operators, name=name or self.name + '_projected')
 
-    def projected_to_subbasis(self, dim_source=None, dim_range=None, name=None):
+    def projected_to_subbasis(self, dim_range=None, dim_source=None, name=None):
         """See :meth:`NumpyMatrixOperator.projected_to_subbasis`."""
         assert dim_source is None or dim_source <= self.source.dim
         assert dim_range is None or dim_range <= self.range.dim
-        proj_operators = [op.projected_to_subbasis(dim_source=dim_source, dim_range=dim_range)
+        proj_operators = [op.projected_to_subbasis(dim_range=dim_range, dim_source=dim_source)
                           for op in self.operators]
         return self.with_(operators=proj_operators, name=name or '{}_projected_to_subbasis'.format(self.name))
 
@@ -339,7 +341,7 @@ class ConstantOperator(OperatorBase):
         assert len(U) == 1
         return ZeroOperator(self.source, self.range, name=self.name + '_jacobian')
 
-    def projected(self, source_basis, range_basis, product=None, name=None):
+    def projected(self, range_basis, source_basis, product=None, name=None):
         assert source_basis is None or source_basis in self.source
         assert range_basis is None or range_basis in self.range
         assert product is None or product.source == product.range == self.range
@@ -385,7 +387,7 @@ class ZeroOperator(OperatorBase):
         count = len(U) if ind is None else 1 if isinstance(ind, Number) else len(ind)
         return self.range.zeros(count)
 
-    def projected(self, source_basis, range_basis, product=None, name=None):
+    def projected(self, range_basis, source_basis, product=None, name=None):
         assert source_basis is None or source_basis in self.source
         assert range_basis is None or range_basis in self.range
         assert product is None or product.source == product.range == self.range

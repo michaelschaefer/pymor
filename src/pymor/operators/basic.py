@@ -123,7 +123,7 @@ class OperatorBase(OperatorInterface):
         else:
             raise TypeError('This operator does not represent a vector or linear functional.')
 
-    def projected(self, source_basis, range_basis, product=None, name=None):
+    def projected(self, range_basis, source_basis, product=None, name=None):
         name = name or '{}_projected'.format(self.name)
         if self.linear and not self.parametric:
             assert source_basis is None or source_basis in self.source
@@ -160,7 +160,7 @@ class OperatorBase(OperatorInterface):
             self.logger.warn('Using inefficient generic projection operator')
             # Since the bases are not immutable and we do not own them,
             # the ProjectedOperator will have to create copies of them.
-            return ProjectedOperator(self, source_basis, range_basis, product, copy=True, name=name)
+            return ProjectedOperator(self, range_basis, source_basis, product, copy=True, name=name)
 
 
 class ProjectedOperator(OperatorBase):
@@ -189,7 +189,7 @@ class ProjectedOperator(OperatorBase):
 
     linear = False
 
-    def __init__(self, operator, source_basis, range_basis, product=None, copy=True, name=None):
+    def __init__(self, operator, range_basis, source_basis, product=None, copy=True, name=None):
         assert isinstance(operator, OperatorInterface)
         assert source_basis is None or source_basis in operator.source
         assert range_basis is None or range_basis in operator.range
@@ -229,7 +229,7 @@ class ProjectedOperator(OperatorBase):
                 V = self.operator.apply(UU, mu=mu)
                 return NumpyVectorArray(self.product.apply2(V, self.range_basis))
 
-    def projected_to_subbasis(self, dim_source=None, dim_range=None, name=None):
+    def projected_to_subbasis(self, dim_range=None, dim_source=None, name=None):
         """See :meth:`NumpyMatrixOperator.projected_to_subbasis`."""
         assert dim_source is None or dim_source <= self.source.dim
         assert dim_range is None or dim_range <= self.range.dim
@@ -240,7 +240,7 @@ class ProjectedOperator(OperatorBase):
             else self.source_basis.copy(ind=range(dim_source))
         range_basis = self.range_basis if dim_range is None \
             else self.range_basis.copy(ind=range(dim_range))
-        return ProjectedOperator(self.operator, source_basis, range_basis, product=None, copy=False, name=name)
+        return ProjectedOperator(self.operator, range_basis, source_basis, product=None, copy=False, name=name)
 
     def jacobian(self, U, mu=None):
         assert len(U) == 1
@@ -249,10 +249,10 @@ class ProjectedOperator(OperatorBase):
             J = self.operator.jacobian(U, mu=mu)
         else:
             J = self.operator.jacobian(self.source_basis.lincomb(U.data), mu=mu)
-        return J.projected(source_basis=self.source_basis, range_basis=self.range_basis,
+        return J.projected(range_basis=self.range_basis, source_basis=self.source_basis,
                            product=self.product, name=self.name + '_jacobian')
 
     def assemble(self, mu=None):
         op = self.operator.assemble(mu=mu)
-        return op.projected(source_basis=self.source_basis, range_basis=self.range_basis,
+        return op.projected(range_basis=self.range_basis, source_basis=self.source_basis,
                             product=self.product, name=self.name + '_assembled')
