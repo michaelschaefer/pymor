@@ -2,7 +2,8 @@
 # Copyright Holders: Rene Milk, Stephan Rave, Felix Schindler
 # License: BSD 2-Clause License (http://opensource.org/licenses/BSD-2-Clause)
 #
-# Contributors: Michael Laier <m_laie01@uni-muenster.de>
+# Contributors: Andreas Buhr <andreas@andreasbuhr.de>
+#               Michael Laier <m_laie01@uni-muenster.de>
 
 from __future__ import absolute_import, division, print_function
 
@@ -80,7 +81,7 @@ def pod(A, modes=None, product=None, tol=4e-8, symmetrize=False, orthonormalize=
 
     above_tol = np.where(EVALS >= tol ** 2 * EVALS[0])[0]
     if len(above_tol) == 0:
-        return type(A).empty(A.dim)
+        return A.space.empty(), np.array([])
     last_above_tol = above_tol[-1]
 
     SVALS = np.sqrt(EVALS[:last_above_tol + 1])
